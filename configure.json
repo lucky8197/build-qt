@@ -5,7 +5,7 @@
             "gh_url": "https://github.com/qt/qt5.git"
         },
         "qt-ohos-patch": {
-            "gc_url": "https://gitcode.com/openharmony-sig/qt.git",
+            "gc_url": "https://gitcode.com/Lucky8197/qt.git",
             "gh_url": "https://github.com/liys-online/qt.git"
         }
     },
