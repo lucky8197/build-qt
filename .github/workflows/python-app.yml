@@ -18,7 +18,7 @@ jobs:
       matrix:
         os: [ windows-2022, ubuntu-22.04, macos-14 ]
         arch: [ arm64-v8a, armeabi-v7a, x86-64 ]
-        api: [ 15, 16, 18, 19 ]
+        api: [ 15, 18, 19 ]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
