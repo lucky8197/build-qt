@@ -4,10 +4,29 @@
 name: Build Qt OHOS
 
 on:
-  push:
-    branches: [ "dev" ]
-  pull_request:
-    branches: [ "dev" ]
+  workflow_dispatch:
+    inputs:
+      qt_version:
+        description: '选择Qt版本'
+        required: true
+        default: 5.15.12
+        type: choice
+        options: [5.15.12]
+
+      ohos_version:
+        description: '选择OpenHarmony版本'
+        required: true
+        default: '17'
+        type: choice
+        options: ['15', '16', '17', '18', '19', '20']
+
+      build_type:
+        description: '选择构建类型'
+        required: true
+        default: release
+        type: choice
+        options: [debug, release]
+
 
 permissions:
   contents: read
@@ -18,7 +37,6 @@ jobs:
       matrix:
         os: [ windows-2022, ubuntu-22.04, macos-14 ]
         arch: [ arm64-v8a, armeabi-v7a, x86-64 ]
-        api: [ 15, 17 ]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -38,24 +56,24 @@ jobs:
               "perl": "${pwd}/work/perl/bin",
               "mingw": "${pwd}/work/mingw/bin",
               "ohos_sdk": "${pwd}/work/ohos-sdk/${ohos_version}",
-              "ohos_version":  "${{ matrix.api }}",
-              "build_type": "release",
+              "ohos_version": ${{ inputs.ohos_version }},
+              "build_type": "${{ inputs.build_type }}",
               "build_ohos_abi": "${{ matrix.arch }}",
-              "build_qt_tag": "v5.15.12-lts-lgpl",
-              "build_ohqt_tag": "dev",
+              "build_qt_tag": "v${{ inputs.qt_version }}-lts-lgpl",
+              "build_ohqt_tag": "master",
               "clone_depth": 1,
               "jobs": 4,
               "verbose": false
             }
           }' > configure.json.user
-          python ./build-qt-ohos.py --init
-          python ./build-qt-ohos.py --exe_stage all --with_pack
+          python ./build-qt-ohos.py --init --use_github
+          python ./build-qt-ohos.py --exe_stage all --with_pack --use_github
           
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: build-output-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.api }}
+          name: ${{ matrix.os }}-output-qt${{ inputs.qt_version }}-${{ matrix.arch }}-${{ inputs.ohos_version }}-${{ inputs.build_type }}
           path: |
             work/output/*.zip
             work/output/*.tar.gz
