@@ -60,14 +60,14 @@ jobs:
               "build_type": "${{ inputs.build_type }}",
               "build_ohos_abi": "${{ matrix.arch }}",
               "build_qt_tag": "v${{ inputs.qt_version }}-lts-lgpl",
-              "build_ohqt_tag": "master",
+              "build_ohqt_tag": "dev",
               "clone_depth": 1,
               "jobs": 4,
               "verbose": false
             }
           }' > configure.json.user
-          python ./build-qt-ohos.py --init --use_github
-          python ./build-qt-ohos.py --exe_stage all --with_pack --use_github
+          python ./build-qt-ohos.py --init
+          python ./build-qt-ohos.py --exe_stage all --with_pack
           
 
       - name: Upload artifact
