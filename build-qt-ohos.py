@@ -3,7 +3,7 @@ import sys
 import io
 import argparse
 from build_qt.qt_repo import QtRepo, QtRepoError
-from build_qt.qt_build import QtBuild
+from build_qt.qt5_build import Qt5Build
 from build_qt.config import Config
 
 def init_parser():
@@ -25,8 +25,25 @@ if __name__ == '__main__':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stdout.reconfigure(line_buffering=True)
     args = init_parser()
-    config = Config(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'configure.json'), args.use_github)
-    qt_dir = os.path.join(config.get_working_dir(), 'qt5')
+    
+    # 获取配置文件路径
+    # 优先使用当前目录的配置文件，如果不存在则使用包内的默认配置
+    config_path = os.path.join(os.getcwd(), 'configure.json')
+    if not os.path.exists(config_path):
+        # 使用包内的默认配置文件
+        package_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(package_dir, 'configure.json')
+        if not os.path.exists(config_path):
+            print(f'错误: 找不到配置文件 configure.json')
+            print(f'已尝试: {os.path.join(os.getcwd(), "configure.json")}')
+            print(f'已尝试: {config_path}')
+            exit(1)
+
+    config = Config(config_path, args.use_github)
+    
+    # 根据Qt版本选择目录名
+    qt_dir_name = 'qt6' if config.is_qt6() else 'qt5'
+    qt_dir = os.path.join(config.get_working_dir(), qt_dir_name)
 
     repo = QtRepo(qt_dir, config)
     if args.init:
@@ -37,8 +54,12 @@ if __name__ == '__main__':
             # Qt OHOS补丁仓库克隆
             repo.clone_patch_repo()
 
-            # 应用补丁
-            repo.apply_patches()
+            # Qt5在init阶段应用补丁，Qt6在build阶段应用
+            if not config.is_qt6():
+                print('Qt5：在init阶段应用补丁')
+                repo.apply_patches()
+            else:
+                print('Qt6：补丁将在build阶段（主机编译后）应用')
         except QtRepoError as e:
             print('QtRepoError:', e)
             exit(1)
@@ -62,8 +83,16 @@ if __name__ == '__main__':
         config.dev_env_check()
         if args.env_check:
             exit()
-        # Qt编译
-        qtBuild = QtBuild(qt_dir, config)
+        
+        # 根据Qt版本选择对应的构建类
+        if config.is_qt6():
+            from build_qt.qt6_build import Qt6Build
+            print('检测到Qt6版本，使用Qt6Build类')
+            qtBuild = Qt6Build(qt_dir, config)
+        else:
+            print('检测到Qt5版本，使用Qt5Build类')
+            qtBuild = Qt5Build(qt_dir, config)
+        
         # 配置
         if args.exe_stage == 'clean':
             qtBuild.clean()

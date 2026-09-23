@@ -13,6 +13,7 @@
 from typing import Optional, List
 import os
 import shutil
+import platform
 import subprocess
 from build_qt.config import Config
 from build_qt.utils import download_component, extract_archive
@@ -30,10 +31,14 @@ class QtRepo:
     """
     def __init__(self, repo_path: str, config: Config, remote_name: str = 'origin'):
         self.repo_path = os.path.abspath(repo_path)
-        self.patch_repo_path = self.repo_path + '_patch'
+        # 使用统一的qt-ohos-patch目录，不区分qt5/qt6
+        work_dir = os.path.dirname(self.repo_path)
+        self.patch_repo_path = os.path.join(work_dir, 'qt-ohos-patch')
         self.remote_name = remote_name
         self.config = config
-        self.git_exe = shutil.which('git')
+        
+        # 尝试查找Git可执行文件
+        self.git_exe = self._find_git()
         if not self.git_exe:
             print('系统中未找到 git 可执行文件')
             temp_dir = os.path.join(self.config.get_working_dir(), '.temp')
@@ -49,6 +54,44 @@ class QtRepo:
                 self.git_exe = os.path.join(git_extracted_path, 'bin', 'git')
             else:
                 raise QtRepoError('Git 解压失败: {}'.format(git_extracted_path))
+    
+    def _find_git(self):
+        """查找Git可执行文件，支持Windows常见安装路径"""
+        # 1. 尝试从PATH查找
+        git_exe = shutil.which('git')
+        if git_exe:
+            print('找到Git: {}'.format(git_exe))
+            return git_exe
+        
+        # 2. Windows上尝试git.exe
+        if platform.system() == 'Windows':
+            git_exe = shutil.which('git.exe')
+            if git_exe:
+                print('找到Git: {}'.format(git_exe))
+                return git_exe
+            
+            # 3. 尝试常见的Windows安装路径
+            common_paths = [
+                r'C:\Program Files\Git\bin\git.exe',
+                r'C:\Program Files (x86)\Git\bin\git.exe',
+                r'C:\Git\bin\git.exe',
+                os.path.expanduser(r'~\AppData\Local\Programs\Git\bin\git.exe'),
+            ]
+            
+            for path in common_paths:
+                if os.path.isfile(path):
+                    print('找到Git: {}'.format(path))
+                    return path
+        
+        # 4. Linux/Mac尝试常见路径
+        else:
+            common_paths = ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git']
+            for path in common_paths:
+                if os.path.isfile(path):
+                    print('找到Git: {}'.format(path))
+                    return path
+        
+        return None
 
     # ---------- 克隆相关 ----------
     def clone(self) -> None:
@@ -61,8 +104,20 @@ class QtRepo:
         depth = self.config.clone_depth()
         branch = self.config.tag()
         if os.path.exists(self.repo_path) and os.listdir(self.repo_path):
-            print('目录已存在: {}, 跳过克隆'.format(self.repo_path))
-            return
+            print('目录已存在: {}'.format(self.repo_path))
+            # 检查是否是 git 仓库
+            if os.path.isdir(os.path.join(self.repo_path, '.git')):
+                print('执行 git 清理操作，确保数据干净...')
+                try:
+                    self.reset_hard()
+                    print('Git 清理完成')
+                    return
+                except Exception as e:
+                    print('Git 清理失败: {}, 将删除目录重新克隆'.format(e))
+                    shutil.rmtree(self.repo_path)
+            else:
+                print('目录存在但不是 git 仓库，将删除后重新克隆')
+                shutil.rmtree(self.repo_path)
 
         cmd = [self.git_exe, 'clone', '--recurse-submodules', '--single-branch', '--shallow-submodules']
         if depth and depth > 0:
@@ -79,13 +134,30 @@ class QtRepo:
         print('Local branches: {}'.format(self.list_branches(local=True)))
 
     def clone_patch_repo(self, depth: int = 0) -> None:
-        """克隆补丁仓库，位于主仓库同级目录的 repo_path + '_patch' 目录下。"""
+        """克隆补丁仓库到统一的qt-ohos-patch目录。"""
         url = self.config.qt_ohos_patch_repo()
         branch = self.config.ohqt_tag()
-        patch_path = self.repo_path + '_patch'
+        patch_path = self.patch_repo_path
         if os.path.exists(patch_path) and os.listdir(patch_path):
-            print('目录已存在: {}, 跳过克隆'.format(patch_path))
-            return
+            print('补丁目录已存在: {}'.format(patch_path))
+            # 检查是否是 git 仓库
+            if os.path.isdir(os.path.join(patch_path, '.git')):
+                print('执行 git 清理操作，确保数据干净...')
+                try:
+                    # 清理补丁仓库
+                    cmd = [self.git_exe, '-C', patch_path, 'reset', '--hard']
+                    print(' '.join(cmd))
+                    subprocess.run(cmd, check=True)
+                    cmd = [self.git_exe, '-C', patch_path, 'clean', '-fdx']
+                    subprocess.run(cmd, check=True)
+                    print('Git 清理完成')
+                    return
+                except Exception as e:
+                    print('Git 清理失败: {}, 将删除目录重新克隆'.format(e))
+                    shutil.rmtree(patch_path)
+            else:
+                print('目录存在但不是 git 仓库，将删除后重新克隆')
+                shutil.rmtree(patch_path)
 
         cmd = [self.git_exe, 'clone', '--single-branch']
         if depth and depth > 0:
@@ -110,17 +182,45 @@ class QtRepo:
             raise QtRepoError('主仓库未初始化')
 
         if not os.path.isdir(os.path.join(self.patch_repo_path, '.git')):
-            raise QtRepoError('补丁仓库未初始化')
+            raise QtRepoError('补丁仓库未初始化，请先执行 --init 步骤克隆补丁仓库')
 
         self.reset_hard()
         tag_dir = self.config.tag()
         if tag_dir:
             tag_dir = tag_dir.replace('-lts-lgpl', '')
         else:
-            tag_dir = 'v5.15.12'  # 默认使用 v5.15.12 目录
+            tag_dir = 'v5.15.17'  # 默认使用 v5.15.17 目录
+        
+        # Qt6的补丁目录在 patch/v6.x.x 下，Qt5在 patch/v5.x.x 下
         patch_dir = os.path.join(self.patch_repo_path, 'patch', tag_dir)
+        print('查找补丁目录: {}'.format(patch_dir))
+        
         if not os.path.isdir(patch_dir):
-            raise QtRepoError('补丁目录不存在: {}'.format(patch_dir))
+            # 列出可用的补丁目录
+            patch_base = os.path.join(self.patch_repo_path, 'patch')
+            if os.path.isdir(patch_base):
+                available = [d for d in os.listdir(patch_base) if os.path.isdir(os.path.join(patch_base, d))]
+                raise QtRepoError('补丁目录不存在: {}\n可用的补丁目录: {}'.format(patch_dir, ', '.join(available)))
+            else:
+                raise QtRepoError('补丁基本目录不存在: {}'.format(patch_base))
+
+        # 拷贝 qtohextras 模块到 Qt 源码目录（Qt5 需要）
+        extras_modules = ['qtohextras', 'qtpdf']
+        for module in extras_modules:
+            module_src = os.path.join(self.patch_repo_path, 'patch', module)
+            if os.path.isdir(module_src):
+                module_dest = os.path.join(self.repo_path, module)
+                if os.path.exists(module_dest):
+                    print('删除已存在的 {} 目录'.format(module))
+                    shutil.rmtree(module_dest)
+                print('拷贝 {} 到: {}'.format(module, module_dest))
+                shutil.copytree(module_src, module_dest)
+                
+                # 创建 .git 文件（Qt5 子模块依赖检查需要）
+                module_git = os.path.join(module_dest, '.git')
+                with open(module_git, 'w') as f:
+                    f.write('gitdir: ../.git/modules/{}\n'.format(module))
+                print('创建 .git 文件: {}'.format(module_git))
 
         patch_files = [f for f in os.listdir(patch_dir) if f.endswith('.patch')]
         if not patch_files:
@@ -143,17 +243,7 @@ class QtRepo:
                     print('应用补丁 {} 成功'.format(patch_file))
                 else:
                     raise QtRepoError('应用补丁 {} 失败'.format(patch_file))
-        # 拷贝patch目录下的qtohextras到qt源码根目录
-        qtohextras_dir = patch_dir = os.path.join(self.patch_repo_path, 'patch', 'qtohextras')
-        if os.path.isdir(qtohextras_dir):
-            dest_dir = os.path.join(self.repo_path, 'qtohextras')
-            if os.path.exists(dest_dir):
-                shutil.rmtree(dest_dir)
-            shutil.copytree(qtohextras_dir, dest_dir)
-            qtohextras_git = os.path.join(dest_dir, '.git')
-            with open(qtohextras_git, "w") as f:
-                f.write('gitdir: ../.git/modules/qtohextras')
-            print('拷贝 qtohextras 目录成功')
+        
         print('所有补丁应用完成')
 
     # ---------- 分支管理 ----------

@@ -6,11 +6,13 @@ from .config import Config
 import shutil
 import datetime
 
-class QtBuild:
+class Qt5Build:
     def __init__(self, source_dir: str, config: Config):
         self.source_dir = source_dir
         self.config = config
-        self.build_dir = os.path.join(self.source_dir, 'build', config.build_type())
+        # 将构建目录放在work目录下，避免补丁应用时被清理
+        work_dir = config.get_working_dir()
+        self.build_dir = os.path.join(work_dir, 'qt5_build', config.build_type())
         self.system = platform.system()
         self.make_tools = 'mingw32-make' if self.system == 'Windows' else 'make'
         self.supported_systems = ['Windows', 'Linux', 'Darwin']
@@ -18,6 +20,7 @@ class QtBuild:
             raise EnvironmentError('Unsupported system: {}'.format(self.system))
         if not os.path.exists(self.build_dir):
             os.makedirs(self.build_dir)
+            print('创建构建目录: {}'.format(self.build_dir))
     
     def configure(self):
         configure_script = os.path.join(self.source_dir, 'configure.bat' if self.system == 'Windows' else 'configure')
